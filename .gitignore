@@ -1,4 +1,23 @@
+# frontend
 dao-fe/node_modules/
-dao-fe/public/
 
-dao-v2/node_modules/
+
+# backend node modules
+dao-v2/dao-backend/node_modules/
+
+# environment files
+.env
+dao-backend/.env
+
+# hardhat
+dao-v2/cache
+dao-v2/artifacts
+
+# coverage
+coverage
+coverage.json
+
+# mac files
+.DS_Store
+
+dao-v2/node_modules
