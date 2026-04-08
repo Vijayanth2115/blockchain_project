@@ -21,3 +21,13 @@ coverage.json
 .DS_Store
 
 dao-v2/node_modules
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+.env/

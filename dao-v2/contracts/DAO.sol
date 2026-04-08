@@ -19,6 +19,8 @@ contract DAO {
         bool executed;
         uint256 createdAt;
         uint256 deadline;
+        address proposer; 
+
     }
 
     address public owner;
@@ -29,9 +31,16 @@ contract DAO {
     mapping(uint256 => mapping(address => bool)) public hasVoted;
 
     uint256 public quorum;
-    uint256 public constant VOTING_DURATION = 5 minutes;
+    uint256 public constant VOTING_DURATION = 2 minutes;
 
-    event ProposalCreated(uint256 indexed id, string description, uint256 deadline);
+    // ✅ UPDATED EVENT
+    event ProposalCreated(
+        uint256 indexed id,
+        string description,
+        address proposer,
+        uint256 deadline
+    );
+
     event VoteCast(uint256 indexed id, address voter, bool support);
     event ProposalExecuted(uint256 indexed id);
 
@@ -67,6 +76,7 @@ contract DAO {
         string calldata _description,
         ProposalType _type
     ) external onlyMember {
+
         proposals.push(
             Proposal({
                 description: _description,
@@ -75,13 +85,16 @@ contract DAO {
                 noVotes: 0,
                 executed: false,
                 createdAt: block.timestamp,
-                deadline: block.timestamp + VOTING_DURATION
+                deadline: block.timestamp + VOTING_DURATION,
+                proposer: msg.sender 
             })
         );
 
+        // ✅ UPDATED EMIT
         emit ProposalCreated(
             proposals.length - 1,
             _description,
+            msg.sender,
             block.timestamp + VOTING_DURATION
         );
     }
@@ -126,7 +139,8 @@ contract DAO {
             uint256,
             bool,
             uint256,
-            uint256
+            uint256,
+            address
         )
     {
         Proposal storage p = proposals[id];
@@ -137,7 +151,8 @@ contract DAO {
             p.noVotes,
             p.executed,
             p.createdAt,
-            p.deadline
+            p.deadline,
+            p.proposer
         );
     }
 
