@@ -9,15 +9,22 @@ import smtplib
 from email.mime.text import MIMEText
 import time
 import smtplib
-
-
 from dotenv import load_dotenv
 load_dotenv()
+import os
+
+AUX_DB="dao.db"
+
+def reset_aux_db():
+    if os.path.exists(AUX_DB):
+        os.remove(AUX_DB)
+        print("🧹 dao.db reset")
+
 
 
 # 🔑 Gemini API
-client = genai.Client(api_key="AIzaSyAnAsuozhklWsvNz9OEVd6YtLPk9-BPuNU")
-client_secondary = genai.Client(api_key="AIzaSyCH-rSY4r54DY_FkBI3ZtJix75UjB0ELgA")
+client = genai.Client(api_key="AIzaSyBT9VIMwdcSvmrnMZFSCvc5Az7caE-vV1Y")
+client_secondary = genai.Client(api_key="AIzaSyANJqosjouYiHqqrwUHvh0vBzHxiw_v7JE")
 
 mcp = FastMCP("DAO AI MCP Server")
 
@@ -86,7 +93,7 @@ DAO Financial State:
 
 
 @mcp.tool()
-def proposal_advisor(description: str, created_by: str = None, proposal_id: str = None):
+def proposal_advisor(description: str, created_by: str = None, proposal_id: str = None, category: str = None):
 
     import json
     import re
@@ -94,42 +101,47 @@ def proposal_advisor(description: str, created_by: str = None, proposal_id: str 
     print("\n📥 Advisor received proposal:")
     print("Description:", description)
     print("Created by:", created_by)
+    print("Category (from blockchain):", category)
 
     db_summary = get_db_summary()
 
+    # =========================
+    # 🧠 SIMPLE PROMPT (NO CATEGORY)
+    # =========================
     prompt = f"""
-    You are an AI advisor for a DAO.
+You are an AI advisor for a DAO.
 
-    Use the DAO data to analyze the proposal.
+Analyze the proposal using the DAO's financial context.
 
-    {db_summary}
+{db_summary}
 
-    IMPORTANT:
-    - Return ONLY valid JSON
-    - Do NOT wrap in ```json
-    - Do NOT add explanations
+Proposal:
+{description}
 
-    CRITICAL:
-    Category MUST be one of:
-    ["financial", "hiring", "governance", "operational", "security"]
 
-    DO NOT invent new categories.
+category :
+{category}
 
-    Proposal:
-    {description}
 
-    Provide:
-    - category (STRICTLY from allowed list)
-    - risk
-    - financial_impact
-    - feasibility
-    - insights
-    - recommendation
-    """
+Return STRICT JSON ONLY:
+
+{{
+  "risk": "<low | medium | high>",
+  "financial_impact": "<short explanation>",
+  "feasibility": "<short explanation>",
+  "insights": "<key insights>",
+  "recommendation": "<approve | reject | modify>"
+}}
+
+Rules:
+- NO markdown
+- NO extra text
+- ONLY JSON
+"""
 
     try:
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",  # ✅ FIXED MODEL
+            model="gemini-3-flash-preview",
             contents=prompt
         )
 
@@ -148,34 +160,28 @@ def proposal_advisor(description: str, created_by: str = None, proposal_id: str 
         # =========================
         try:
             analysis = json.loads(cleaned)
-            print("analysis:\n",analysis)
-
         except Exception as e:
             print("⚠️ JSON parse failed:", e)
 
-            # 🔥 FALLBACK: try extracting JSON manually
             match = re.search(r"\{.*\}", cleaned, re.DOTALL)
 
             if match:
                 try:
                     analysis = json.loads(match.group())
                 except:
-                    analysis = fallback_analysis(description, cleaned)
+                    analysis = fallback_analysis(cleaned)
             else:
-                analysis = fallback_analysis(description, cleaned)
-
-        # =========================
-        # 🔥 NORMALIZE CATEGORY
-        # =========================
-        if "category" in analysis:
-            analysis["category"] = analysis["category"].lower()
-        else:
-            analysis["category"] = fallback_category(description)
+                analysis = fallback_analysis(cleaned)
 
     except Exception as e:
         print("❌ Gemini API error:", e)
 
-        analysis = fallback_analysis(description, str(e))
+        analysis = fallback_analysis(str(e))
+
+    # =========================
+    # 🔥 FORCE CATEGORY (MOST IMPORTANT)
+    # =========================
+    analysis["category"] = category
 
     result = {
         "created_by": created_by,
@@ -189,6 +195,20 @@ def proposal_advisor(description: str, created_by: str = None, proposal_id: str 
     print("==============================\n")
 
     return result
+
+
+# =========================
+# 🔥 SIMPLE FALLBACK
+# =========================
+# def fallback_analysis(raw_text):
+
+#     return {
+#         "risk": "unknown",
+#         "financial_impact": "unknown",
+#         "feasibility": "unknown",
+#         "insights": "Fallback analysis used",
+#         "recommendation": raw_text[:200]
+#     }
 
 
 # =========================
@@ -351,7 +371,7 @@ def financial_action(details: str) -> dict:
 def send_telegram(message):
 
     BOT_TOKEN = "8666766566:AAHPaM0H5PuMPlsAitTjrKUaZgSQqu3B89s"
-    CHAT_ID = "-1003702720370"   # group id (usually starts with -100...)
+    CHAT_ID = "-1003702720370"   
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
@@ -641,20 +661,23 @@ def call_gemini_with_retry(prompt, retries=3):
 # 🏛 GOVERNANCE TOOL
 # =========================
 @mcp.tool()
-def governance_action(details: str, analysis: dict):
+def governance_action(details: str):
     """
-    Governance tool (NO re-analysis, ONLY execution + email formatting)
+    Governance tool (NO AI, only DB + structured email)
     """
 
+    import sqlite3
+    import datetime
+    import smtplib
+    from email.mime.text import MIMEText
+
     try:
-        # =========================
-        # 🧠 USE ADVISOR DATA
-        # =========================
-        category = analysis.get("category", "governance")
-        action_type = analysis.get("action_type", "FUTURE_UPDATE")
-        summary = analysis.get("summary", "")
-        insights = analysis.get("insights", "")
-        priority = analysis.get("risk", "medium")
+        print("\n⚙️ Governance tool triggered")
+        print("Proposal:", details)
+
+        category = "governance"
+        action_type = "FUTURE_UPDATE"
+        priority = "medium"
 
         # =========================
         # 🗄️ STORE IN DB
@@ -668,8 +691,6 @@ def governance_action(details: str, analysis: dict):
             proposal TEXT,
             category TEXT,
             action_type TEXT,
-            summary TEXT,
-            details TEXT,
             priority TEXT,
             created_at TEXT
         )
@@ -677,14 +698,12 @@ def governance_action(details: str, analysis: dict):
 
         cursor.execute("""
         INSERT INTO governance_changes
-        (proposal, category, action_type, summary, details, priority, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (proposal, category, action_type, priority, created_at)
+        VALUES (?, ?, ?, ?, ?)
         """, (
             details,
             category,
             action_type,
-            summary,
-            insights,
             priority,
             datetime.datetime.now().isoformat()
         ))
@@ -692,56 +711,39 @@ def governance_action(details: str, analysis: dict):
         conn.commit()
         conn.close()
 
+        print("🗄️ Governance change stored in DB")
+
         # =========================
-        # ✉️ GENERATE EMAIL (AI ONLY FOR FORMATTING)
+        # 📧 STRUCTURED EMAIL
         # =========================
-        email_prompt = f"""
-You are generating a professional governance email.
-
-Proposal: {details}
-Summary: {summary}
-Insights: {insights}
-Priority: {priority}
-
-Write a clear, concise email to the Steward explaining:
-- what the proposal is
-- what needs to be done
-- suggested next steps
-
-No JSON. Only email text.
-"""
-
-        response = call_gemini_with_retry(email_prompt)
-
-        if response and response.text:
-            email_text = response.text.strip()
-        else:
-            # ✅ fallback email (VERY IMPORTANT)
-            email_text = f"""
-📢 Governance Update
+        email_text = f"""
+📢 DAO Governance Proposal
 
 Proposal:
 {details}
 
-Summary:
-{summary}
+Category:
+Governance
 
-Insights:
-{insights}
+Action Type:
+Future Update Required
+
+Details:
+This proposal requires changes to DAO rules or configuration.
+These changes should NOT be applied immediately.
+
+Next Steps:
+- Review proposal carefully
+- Plan required contract/backend updates
+- Implement in next system version
 
 Priority:
-{priority}
-
-Action:
-Please review and implement in the next system version.
+Medium
 """
 
-        # =========================
-        # 📧 SEND EMAIL
-        # =========================
         msg = MIMEText(email_text)
 
-        msg["Subject"] = "DAO Governance Update"
+        msg["Subject"] = "DAO Governance Action Required"
         msg["From"] = "vijayanthvenkat96@gmail.com"
         msg["To"] = "blockchain42project@gmail.com"
 
@@ -761,8 +763,8 @@ Please review and implement in the next system version.
         return {
             "tool": "governance",
             "status": "processed",
-            "email_sent": True,
-            "stored": True
+            "stored": True,
+            "email_sent": True
         }
 
     except Exception as e:
@@ -774,15 +776,228 @@ Please review and implement in the next system version.
 
 
 
-
 @mcp.tool()
 def operational_action(details: str):
-    return {"tool": "operational", "status": "not_implemented"}
+    """
+    Operational tool (DB + structured email)
+    """
+
+    import sqlite3
+    import datetime
+    import smtplib
+    from email.mime.text import MIMEText
+
+    try:
+        print("\n⚙️ Operational tool triggered")
+        print("Proposal:", details)
+
+        category = "operational"
+        action_type = "EXECUTE_UPDATE"
+        priority = "medium"
+
+        # =========================
+        # 🗄️ STORE IN DB
+        # =========================
+        conn = sqlite3.connect("dao.db")
+        cursor = conn.cursor()
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS operational_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposal TEXT,
+            category TEXT,
+            action_type TEXT,
+            priority TEXT,
+            created_at TEXT
+        )
+        """)
+
+        cursor.execute("""
+        INSERT INTO operational_changes
+        (proposal, category, action_type, priority, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """, (
+            details,
+            category,
+            action_type,
+            priority,
+            datetime.datetime.now().isoformat()
+        ))
+
+        conn.commit()
+        conn.close()
+
+        print("🗄️ Operational change stored")
+
+        # =========================
+        # 📧 EMAIL
+        # =========================
+        email_text = f"""
+📢 DAO Operational Update
+
+Proposal:
+{details}
+
+Category:
+Operational
+
+Action Type:
+Immediate Backend/System Update
+
+Details:
+This proposal affects internal workflows or system operations.
+It can be implemented without smart contract changes.
+
+Next Steps:
+- Review system impact
+- Apply backend/config updates
+- Monitor system behavior
+
+Priority:
+Medium
+"""
+
+        msg = MIMEText(email_text)
+
+        msg["Subject"] = "DAO Operational Action Required"
+        msg["From"] = "vijayanthvenkat96@gmail.com"
+        msg["To"] = "blockchain42project@gmail.com"
+
+        try:
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                server.login("vijayanthvenkat96@gmail.com", "plsntsthiiddgxik")
+                server.send_message(msg)
+
+            print("📧 Operational email sent")
+
+        except Exception as e:
+            print("⚠️ Email failed:", e)
+
+        return {
+            "tool": "operational",
+            "status": "processed",
+            "stored": True,
+            "email_sent": True
+        }
+
+    except Exception as e:
+        return {
+            "tool": "operational",
+            "status": "error",
+            "message": str(e)
+        }
 
 
 @mcp.tool()
 def security_action(details: str):
-    return {"tool": "security", "status": "not_implemented"}
+    """
+    Security tool (DB + structured email)
+    """
+
+    import sqlite3
+    import datetime
+    import smtplib
+    from email.mime.text import MIMEText
+
+    try:
+        print("\n🔐 Security tool triggered")
+        print("Proposal:", details)
+
+        category = "security"
+        action_type = "SECURITY_ALERT"
+        priority = "high"
+
+        # =========================
+        # 🗄️ STORE IN DB
+        # =========================
+        conn = sqlite3.connect("dao.db")
+        cursor = conn.cursor()
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS security_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposal TEXT,
+            category TEXT,
+            action_type TEXT,
+            priority TEXT,
+            created_at TEXT
+        )
+        """)
+
+        cursor.execute("""
+        INSERT INTO security_alerts
+        (proposal, category, action_type, priority, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """, (
+            details,
+            category,
+            action_type,
+            priority,
+            datetime.datetime.now().isoformat()
+        ))
+
+        conn.commit()
+        conn.close()
+
+        print("🗄️ Security alert stored")
+
+        # =========================
+        # 📧 EMAIL
+        # =========================
+        email_text = f"""
+🚨 DAO SECURITY ALERT
+
+Proposal:
+{details}
+
+Category:
+Security
+
+Action Type:
+Immediate Attention Required
+
+Details:
+This proposal indicates a potential security concern.
+Immediate review and action is required.
+
+Next Steps:
+- Investigate the issue
+- Check affected systems/users
+- Apply necessary restrictions or fixes
+
+Priority:
+HIGH 🚨
+"""
+
+        msg = MIMEText(email_text)
+
+        msg["Subject"] = "🚨 DAO Security Alert"
+        msg["From"] = "vijayanthvenkat96@gmail.com"
+        msg["To"] = "blockchain42project@gmail.com"
+
+        try:
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                server.login("vijayanthvenkat96@gmail.com", "plsntsthiiddgxik")
+                server.send_message(msg)
+
+            print("📧 Security email sent")
+
+        except Exception as e:
+            print("⚠️ Email failed:", e)
+
+        return {
+            "tool": "security",
+            "status": "processed",
+            "stored": True,
+            "email_sent": True
+        }
+
+    except Exception as e:
+        return {
+            "tool": "security",
+            "status": "error",
+            "message": str(e)
+        }
 
 # =========================
 # 🚀 DAO ROUTER (FINAL)
@@ -831,7 +1046,7 @@ def route_proposal(description: str, analysis: dict):
 
     elif category == "governance":
         # result = governance_action(description)
-        result = governance_action(description, analysis)
+        result = governance_action(description)
 
     elif category == "operational":
         result = operational_action(description)
@@ -871,6 +1086,8 @@ def fallback_category(description: str):
 # INIT ALWAYS (IMPORTANT)
 # =========================
 
+
+reset_aux_db()
 init_db()
 seed_data()
 

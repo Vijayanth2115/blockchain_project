@@ -137,41 +137,31 @@ def get_all_members():
     return members
 
 
+
+
+
 @app.post("/process")
 async def process(p: dict):
 
     description = p.get("description")
     created_by = p.get("created_by")
-    proposal_id = p.get("proposal_id")
+    category = p.get("category")
 
     if not description:
         return {"error": "No description provided"}
 
     print("\n📥 Received proposal:", description)
 
-    # =========================
-    # 🧠 STEP 1: AI ADVISOR
-    # =========================
-    advisor_result = proposal_advisor(
-            description=description,
-            created_by=created_by,
-            proposal_id=proposal_id
-        )
+    # ✅ NO AI HERE
+    analysis = {
+        "category": category
+    }
 
-    analysis = advisor_result.get("analysis", {})
-
-    # =========================
-    # 🚀 STEP 2: ROUTER
-    # =========================
     result = route_proposal(description, analysis)
 
     print("⚙️ Execution processed:", result)
 
-    # =========================
-    # 📤 RESPONSE
-    # =========================
     return {
-        "advisor": advisor_result,
         "execution": result
     }
 
@@ -183,6 +173,7 @@ async def analyze(p: dict):
     description = p.get("description")
     created_by = p.get("created_by")
     proposal_id = p.get("proposal_id")
+    category = p.get("category")
 
     if not description:
         return {"error": "No description provided"}
@@ -198,7 +189,8 @@ async def analyze(p: dict):
         result = proposal_advisor(
             description=description,
             created_by=created_by,
-            proposal_id=proposal_id
+            proposal_id=proposal_id,
+            category=category
         )
     except Exception as e:
         print("❌ Advisor failed:", e)
@@ -329,6 +321,33 @@ async def get_member(address: str):
         return {"name": row[0]}
     else:
         return {"name": "Unknown"}
+
+
+
+#for accessing members list in the interface
+@app.get("/members")
+async def get_members():
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT address, name, email FROM members")
+    rows = cursor.fetchall()
+
+    conn.close()
+
+    members = []
+
+    for row in rows:
+        members.append({
+            "address": row[0],
+            "name": row[1],
+            "email": row[2]
+        })
+
+    return {"members": members}
+
+
 
 
 # =========================

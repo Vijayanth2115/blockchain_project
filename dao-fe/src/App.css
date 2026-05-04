@@ -856,3 +856,43 @@ hr {
 .glow-blue    { box-shadow: 0 0 20px rgba(56, 189, 248, 0.3); }
 .glow-violet  { box-shadow: 0 0 20px rgba(129, 140, 248, 0.3); }
 .glow-green   { box-shadow: 0 0 20px rgba(74, 222, 128, 0.3); }
+
+.members-grid{
+display:grid;
+gap:18px;
+margin-top:20px;
+}
+
+.member-card{
+display:flex;
+gap:16px;
+align-items:center;
+padding:18px;
+border-radius:18px;
+border:1px solid rgba(255,255,255,.08);
+}
+
+.member-avatar{
+width:52px;
+height:52px;
+border-radius:50%;
+display:flex;
+align-items:center;
+justify-content:center;
+font-weight:700;
+font-size:20px;
+background:linear-gradient(135deg,#4facfe,#00f2fe);
+}
+
+.sidebar-item{
+cursor:pointer;
+transition:.25s;
+}
+
+.sidebar-item:hover{
+transform:translateX(4px);
+}
+
+.sidebar-item.active{
+font-weight:600;
+}
